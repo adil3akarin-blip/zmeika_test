@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Snake — Telegram Mini App (with D‑Pad)</title>
+  <title>Snake — Telegram Mini App (single Start)</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     :root{
@@ -32,6 +32,7 @@
     canvas{ display:block; width:100%; height:auto; border-radius:12px; background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.12)); }
 
     .row{display:flex; gap:8px; align-items:center; justify-content:center; margin-top:10px}
+    #controlsRow{display:flex}
     button.btn{appearance:none; border:none; border-radius:12px; padding:10px 14px; font-weight:700; cursor:pointer; background:var(--accent); color:var(--accent-text)}
     button.ghost{background:transparent; color:var(--fg); border:1px solid rgba(255,255,255,.08)}
     .hint{color:var(--muted); font-size:12px; text-align:center; margin-top:8px}
@@ -54,7 +55,7 @@
     <div class="card">
       <canvas id="game" width="400" height="400" aria-label="Snake game canvas" role="img"></canvas>
       <div id="status" class="hint">Свайпы/стрелки для управления. Нажмите «Старт».</div>
-      <div class="row">
+      <div id="controlsRow" class="row">
         <button id="start" class="btn">Старт</button>
         <button id="pause" class="btn ghost" hidden>Пауза</button>
         <button id="resume" class="btn" hidden>Продолжить</button>
@@ -78,19 +79,16 @@
   </div>
 
   <script>
-    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : {
+    // Detect real Telegram environment (no stub) to decide which Start button to use
+    const insideTelegram = !!(window.Telegram && window.Telegram.WebApp && (window.Telegram.WebApp.platform || window.Telegram.WebApp.initData || window.Telegram.WebApp.initDataUnsafe));
+    const tg = insideTelegram ? window.Telegram.WebApp : {
       ready: ()=>{}, expand: ()=>{}, HapticFeedback: {impactOccurred: ()=>{}},
       BottomButton: null, MainButton: null, onEvent: ()=>{}, offEvent: ()=>{},
       isVersionAtLeast: ()=>false
     };
     try { tg.ready(); tg.expand(); } catch (_) {}
 
-    const BottomButton = tg.BottomButton || tg.MainButton;
-    if (BottomButton) {
-      BottomButton.setText('Старт');
-      BottomButton.onClick(() => startGame());
-      BottomButton.show();
-    }
+    const BottomButton = insideTelegram ? (tg.BottomButton || tg.MainButton) : null;
 
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
@@ -98,13 +96,23 @@
     const startBtn = document.getElementById('start');
     const pauseBtn = document.getElementById('pause');
     const resumeBtn = document.getElementById('resume');
+    const controlsRow = document.getElementById('controlsRow');
     const statusEl = document.getElementById('status');
     const overEl = document.getElementById('over');
     const dpadEl = document.getElementById('dpad');
 
+    // Show either Telegram MainButton or in‑card buttons (never both)
+    if (BottomButton) {
+      // Hide in‑card controls and use Telegram Main/BottomButton
+      controlsRow.style.display = 'none';
+      BottomButton.setText('Старт');
+      BottomButton.onClick(() => startGame());
+      BottomButton.show();
+    }
+
     function fitCanvas(){
       const dpr = window.devicePixelRatio || 1;
-      const side = Math.min(window.innerWidth - 24, 520 - 24, window.innerHeight - 220);
+      const side = Math.min(window.innerWidth - 24, 520 - 24, window.innerHeight - (BottomButton ? 260 : 180));
       const size = Math.max(240, Math.min(520, Math.floor(side)));
       canvas.style.width = size + 'px';
       canvas.style.height = size + 'px';
@@ -139,7 +147,8 @@
     function startGame(){
       if (state === 'running') return;
       if (BottomButton) { BottomButton.setText('Пауза'); BottomButton.onClick(() => togglePause()); }
-      startBtn.hidden = true; pauseBtn.hidden = false; resumeBtn.hidden = true; overEl.hidden = true;
+      else { startBtn.hidden = true; pauseBtn.hidden = false; resumeBtn.hidden = true; }
+      overEl.hidden = true;
       statusEl.textContent = 'Игра началась!';
       tg.HapticFeedback && tg.HapticFeedback.impactOccurred('light');
       running = true; state = 'running';
@@ -150,12 +159,12 @@
     function togglePause(){
       if (state === 'running'){
         state = 'paused'; running = false; statusEl.textContent = 'Пауза';
-        pauseBtn.hidden = true; resumeBtn.hidden = false;
         if (BottomButton){ BottomButton.setText('Продолжить'); BottomButton.onClick(() => togglePause()); }
+        else { pauseBtn.hidden = true; resumeBtn.hidden = false; }
       } else if (state === 'paused'){
         state = 'running'; running = true; statusEl.textContent = 'Игра продолжается';
-        pauseBtn.hidden = false; resumeBtn.hidden = true;
         if (BottomButton){ BottomButton.setText('Пауза'); BottomButton.onClick(() => togglePause()); }
+        else { pauseBtn.hidden = false; resumeBtn.hidden = true; }
         requestAnimationFrame(loop);
       }
     }
@@ -163,7 +172,7 @@
     function gameOver(){
       state = 'over'; running = false; overEl.hidden = false; statusEl.textContent = 'Столкновение!';
       if (BottomButton){ BottomButton.setText('Старт'); BottomButton.onClick(() => { reset(); startGame(); }); }
-      startBtn.hidden = false; pauseBtn.hidden = true; resumeBtn.hidden = true;
+      else { startBtn.hidden = false; pauseBtn.hidden = true; resumeBtn.hidden = true; }
       try { tg.HapticFeedback.impactOccurred('medium'); } catch(_){}
       try { tg.sendData && tg.sendData(JSON.stringify({ event:'score', score })); } catch(_){}
     }
@@ -232,7 +241,7 @@
       touchStart=null;
     }, {passive:true});
 
-    // Buttons
+    // In‑card Buttons (used only outside Telegram)
     startBtn.addEventListener('click', ()=>{ if (state==='over' || state==='idle'){ reset(); startGame(); }});
     pauseBtn.addEventListener('click', togglePause);
     resumeBtn.addEventListener('click', togglePause);
