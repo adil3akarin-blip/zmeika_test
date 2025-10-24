@@ -80,16 +80,17 @@
 
   <script>
     // Detect real Telegram environment (no stub) to decide which Start button to use
-    const insideTelegram = !!(window.Telegram && window.Telegram.WebApp && (window.Telegram.WebApp.platform || window.Telegram.WebApp.initData || window.Telegram.WebApp.initDataUnsafe));
+    const insideTelegram = !!(window.Telegram && window.Telegram.WebApp &&
+      (window.Telegram.WebApp.platform || window.Telegram.WebApp.initData || window.Telegram.WebApp.initDataUnsafe));
     const tg = insideTelegram ? window.Telegram.WebApp : {
       ready: ()=>{}, expand: ()=>{}, HapticFeedback: {impactOccurred: ()=>{}},
       BottomButton: null, MainButton: null, onEvent: ()=>{}, offEvent: ()=>{},
       isVersionAtLeast: ()=>false
     };
     try { tg.ready(); tg.expand(); } catch (_) {}
-
+  
     const BottomButton = insideTelegram ? (tg.BottomButton || tg.MainButton) : null;
-
+  
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
     const scoreEl = document.getElementById('score');
@@ -100,16 +101,30 @@
     const statusEl = document.getElementById('status');
     const overEl = document.getElementById('over');
     const dpadEl = document.getElementById('dpad');
-
-    // Show either Telegram MainButton or in‑card buttons (never both)
+  
+    // ===== use ONLY ONE set of controls =====
     if (BottomButton) {
-      // Hide in‑card controls and use Telegram Main/BottomButton
-      controlsRow.style.display = 'none';
+      if (controlsRow) controlsRow.style.display = 'none';
       BottomButton.setText('Старт');
-      BottomButton.onClick(() => startGame());
+  
+      // СТАБИЛЬНЫЙ обработчик, не перевешиваем его позже
+      const mainBtnHandler = () => {
+        if (state === 'idle' || state === 'over') { reset(); startGame(); }
+        else if (state === 'running') { togglePause(); }
+        else if (state === 'paused') { togglePause(); }
+      };
+  
+      // на всякий случай снимаем старые, если клиент их помнит
+      BottomButton.offClick && BottomButton.offClick();
+      BottomButton.onClick(mainBtnHandler);
       BottomButton.show();
+    } else {
+      // обычный браузер — внутренние кнопки
+      startBtn.addEventListener('click', ()=>{ if (state==='over' || state==='idle'){ reset(); startGame(); }});
+      pauseBtn.addEventListener('click', togglePause);
+      resumeBtn.addEventListener('click', togglePause);
     }
-
+  
     function fitCanvas(){
       const dpr = window.devicePixelRatio || 1;
       const side = Math.min(window.innerWidth - 24, 520 - 24, window.innerHeight - (BottomButton ? 260 : 180));
@@ -122,12 +137,12 @@
       draw();
     }
     window.addEventListener('resize', fitCanvas);
-
+  
     const COLS = 22, ROWS = 22;
     const CELL = () => Math.min(canvas.width, canvas.height) / Math.max(COLS, ROWS) / (window.devicePixelRatio||1);
-
+  
     let snake, dir, nextDir, food, score, running, lastTime, stepMs, acc, state;
-
+  
     function reset(){
       snake = [{x:~~(COLS/2), y:~~(ROWS/2)}];
       dir = {x:1, y:0}; nextDir = dir;
@@ -135,48 +150,57 @@
       stepMs = 140; acc = 0; lastTime = 0; running = false; state = 'idle';
       spawnFood();
       overEl.hidden = true; statusEl.textContent = 'Свайпы/стрелки для управления. Нажмите «Старт».';
+      // При входе в idle обновим надпись на системной кнопке
+      BottomButton && BottomButton.setText('Старт');
     }
-
+  
     function updateScore(){ scoreEl.textContent = score; }
-
+  
     function spawnFood(){
       do { food = { x: Math.floor(Math.random()*COLS), y: Math.floor(Math.random()*ROWS) }; }
       while (snake.some(s => s.x===food.x && s.y===food.y));
     }
-
+  
+    // ==== ВАЖНО: внутри этих функций НЕ трогаем onClick у BottomButton ====
     function startGame(){
       if (state === 'running') return;
-      if (BottomButton) { BottomButton.setText('Пауза'); BottomButton.onClick(() => togglePause()); }
-      else { startBtn.hidden = true; pauseBtn.hidden = false; resumeBtn.hidden = true; }
       overEl.hidden = true;
       statusEl.textContent = 'Игра началась!';
       tg.HapticFeedback && tg.HapticFeedback.impactOccurred('light');
       running = true; state = 'running';
+      BottomButton && BottomButton.setText('Пауза');      // только текст
+      startBtn && (startBtn.hidden = true);
+      pauseBtn && (pauseBtn.hidden = false);
+      resumeBtn && (resumeBtn.hidden = true);
       lastTime = performance.now();
       requestAnimationFrame(loop);
     }
-
+  
     function togglePause(){
       if (state === 'running'){
         state = 'paused'; running = false; statusEl.textContent = 'Пауза';
-        if (BottomButton){ BottomButton.setText('Продолжить'); BottomButton.onClick(() => togglePause()); }
-        else { pauseBtn.hidden = true; resumeBtn.hidden = false; }
+        BottomButton && BottomButton.setText('Продолжить'); // только текст
+        pauseBtn && (pauseBtn.hidden = true);
+        resumeBtn && (resumeBtn.hidden = false);
       } else if (state === 'paused'){
         state = 'running'; running = true; statusEl.textContent = 'Игра продолжается';
-        if (BottomButton){ BottomButton.setText('Пауза'); BottomButton.onClick(() => togglePause()); }
-        else { pauseBtn.hidden = false; resumeBtn.hidden = true; }
+        BottomButton && BottomButton.setText('Пауза');      // только текст
+        pauseBtn && (pauseBtn.hidden = false);
+        resumeBtn && (resumeBtn.hidden = true);
         requestAnimationFrame(loop);
       }
     }
-
+  
     function gameOver(){
       state = 'over'; running = false; overEl.hidden = false; statusEl.textContent = 'Столкновение!';
-      if (BottomButton){ BottomButton.setText('Старт'); BottomButton.onClick(() => { reset(); startGame(); }); }
-      else { startBtn.hidden = false; pauseBtn.hidden = true; resumeBtn.hidden = true; }
+      BottomButton && BottomButton.setText('Старт');       // только текст
+      startBtn && (startBtn.hidden = false);
+      pauseBtn && (pauseBtn.hidden = true);
+      resumeBtn && (resumeBtn.hidden = true);
       try { tg.HapticFeedback.impactOccurred('medium'); } catch(_){}
       try { tg.sendData && tg.sendData(JSON.stringify({ event:'score', score })); } catch(_){}
     }
-
+  
     function step(){
       if ((nextDir.x !== -dir.x) || (nextDir.y !== -dir.y)) dir = nextDir;
       const head = { x: (snake[0].x + dir.x + COLS) % COLS, y: (snake[0].y + dir.y + ROWS) % ROWS };
@@ -190,7 +214,7 @@
         snake.pop();
       }
     }
-
+  
     function loop(now){
       if (!running) return;
       const dt = now - lastTime; lastTime = now; acc += dt;
@@ -198,7 +222,7 @@
       draw();
       requestAnimationFrame(loop);
     }
-
+  
     function draw(){
       const cs = CELL();
       ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -213,7 +237,7 @@
         roundRect(ctx, s.x*cs+1, s.y*cs+1, cs-2, cs-2, 8, true);
       }
     }
-
+  
     function roundRect(ctx, x, y, w, h, r, fill){
       ctx.beginPath();
       ctx.moveTo(x+r, y);
@@ -224,14 +248,14 @@
       ctx.closePath();
       if (fill) ctx.fill();
     }
-
+  
     // Keyboard & swipe
     const keyMap = { ArrowUp:{x:0,y:-1}, ArrowDown:{x:0,y:1}, ArrowLeft:{x:-1,y:0}, ArrowRight:{x:1,y:0},
                      KeyW:{x:0,y:-1}, KeyS:{x:0,y:1}, KeyA:{x:-1,y:0}, KeyD:{x:1,y:0} };
     window.addEventListener('keydown', (e)=>{
       const nd = keyMap[e.code]; if (!nd) return; nextDir = nd; e.preventDefault();
     }, {passive:false});
-
+  
     let touchStart=null;
     canvas.addEventListener('touchstart', e=>{ touchStart = e.changedTouches[0]; }, {passive:true});
     canvas.addEventListener('touchend', e=>{
@@ -240,13 +264,8 @@
       if (Math.abs(dx) > Math.abs(dy)) nextDir = {x: dx>0?1:-1, y:0}; else nextDir = {x:0, y: dy>0?1:-1};
       touchStart=null;
     }, {passive:true});
-
-    // In‑card Buttons (used only outside Telegram)
-    startBtn.addEventListener('click', ()=>{ if (state==='over' || state==='idle'){ reset(); startGame(); }});
-    pauseBtn.addEventListener('click', togglePause);
-    resumeBtn.addEventListener('click', togglePause);
-
-    // D‑Pad show logic & events
+  
+    // D-Pad show logic & events
     const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints>0) || window.matchMedia('(pointer:coarse)').matches;
     if (dpadEl) dpadEl.hidden = !isTouch;
     function setNextDirByName(name){
@@ -259,10 +278,11 @@
         btn.addEventListener('click', (e)=>{ e.preventDefault(); setNextDirByName(btn.dataset.dir); });
       });
     }
-
+  
     if (tg.onEvent){ tg.onEvent('themeChanged', draw); }
-
+  
     reset(); fitCanvas();
-  </script>
+</script>
+
 </body>
 </html>
